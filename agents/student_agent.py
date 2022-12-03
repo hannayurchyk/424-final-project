@@ -12,6 +12,9 @@ import time
 TIME_DELTA = 0.05
 COMPUTATION_TIME = 2
 
+def flatten(l):
+    return [item for sublist in l for subsublist in sublist for item in subsublist]
+
 def heuristic(state):
     return 2
 
@@ -81,7 +84,10 @@ class Node:
         self.expanded = False
         
     def __eq__(self, other):
-        return self.my_pos == other.my_pos and self.adv_pos == self.adv_pos and self.chess_board == other.chess_board
+        if not (self.my_pos == other.my_pos and self.adv_pos == other.adv_pos):
+            return False
+
+        return all(flatten(self.chess_board == other.chess_board))
     
     def __contains__(self, item):
         return any(item, lambda x : self.__eq__(item))
@@ -95,35 +101,47 @@ class Node:
         
         # If the node was not visited, we will prioritize the exploration of the  node 
         # by setting its value to infinity
-        if self.visits == 0:
+        if self.visits == 0 or current_state == 0:
             return math.inf
+        
         # Otherwise return its confidence bound value
-        return self.wins / self.visits + c * math.sqrt(math.log(current_state.wins)/self.visits)
+        return self.wins / self.visits + c * math.sqrt(math.log(current_state)/self.visits)
     
     def generate_possible_moves(self, max_step):
         move_directions = ((-1, 0, 0), (0, 1, 1), (1, 0, 2), (0, -1, 3)) # Move Up, Right, Down, Left 
-        queue = [(self, 0)] # List of possible children nodes
         
         if self.agent_turn:
             current_pos = lambda s: s.my_pos
             other_pos_fn = lambda s: s.adv_pos
-            new_node = lambda new_chess_board, pos, dir: Node(new_chess_board, pos, dir, self.adv_pos, not self.agent_turn)
+            new_node = lambda new_chess_board, pos, dir: Node(self, new_chess_board, pos, dir, self.adv_pos, not self.agent_turn)
         else:
             current_pos = lambda s: s.adv_pos
             other_pos_fn = lambda s: s.my_pos
-            new_node = lambda new_chess_board, pos, dir: Node(new_chess_board, self.my_pos, dir, pos, not self.agent_turn)
-            
+            new_node = lambda new_chess_board, pos, dir: Node(self, new_chess_board, self.my_pos, dir, pos, not self.agent_turn)
+        
+        # ADD WALLS AROUND CURRENT POSITION
+        for (_, _, dir) in move_directions:
+            r, c = current_pos(self)
+            if not self.chess_board[r][c][dir]:
+                new_chess_board = deepcopy(self.chess_board)
+                new_chess_board[r][c][dir] = True
+                self.possible_children.append(new_node(new_chess_board, current_pos(self), dir))
+                
+        queue = [(self, 0)] # List of possible children nodes
+
         while queue:
             child, step_size = queue.pop(0)
             # Check if the child is in the possible children
-            if child in self.possible_children:
+            node_child = [x for x, _ in self.possible_children]
+            if child in node_child:
                 continue
             
-            # TODO call to heuristic         
-            self.possible_children.append((child, child.heursitic())) 
+            # TODO call to heuristic   
+            if not child == self:      
+                self.possible_children.append((child, child.heuristic())) 
             
             # Check max step size
-            if step_size >= max_step:
+            if step_size >= max_step: ## TODO watch boundaries
                 continue
             
             pos = current_pos(child)
@@ -148,10 +166,10 @@ class Node:
                     new_chess_board[new_row][new_col][dir] = True
                     
                     new_child = new_node(new_chess_board, (new_row, new_col), dir)
-                    self.possible_children.append(new_child)
+                    #self.possible_children.append((new_child, new_child.heuristic()))
                     queue.append((new_child, step_size + 1))
                     
-        self.possible_children = sorted(self.possible_children, key = lambda _, val: val, reverse=self.agent_turn)
+        self.possible_children = sorted(self.possible_children, key = lambda val: val[1], reverse=self.agent_turn)
         
     def push_next_children(self, n):
         temp = self.possible_children[:n]
@@ -176,9 +194,9 @@ class Node:
             node.visits += visits
             node = node.parent
            
-    def rollout(self, num_rollouts):
+    def rollout(self, num_rollouts, max_step):
         rollout = HeuristicRollout(self)
-        rollout.run(num_rollouts)
+        rollout.run(num_rollouts, max_step)
   
         
 class HeuristicRollout:
@@ -191,12 +209,12 @@ class HeuristicRollout:
         return num_rollouts*0.5
     
     # TODO misuse of num_rollouts + acc
-    def rec_rollout(self, state_to_explore, num_rollouts):
-        state_to_explore.expand(0)
+    def rec_rollout(self, state_to_explore, num_rollouts, max_step):
+        state_to_explore.expand(0, max_step)
         
         acc = 0
         
-        for next_state in state_to_explore.possible_children[:num_rollouts]:
+        for (next_state, heur) in state_to_explore.possible_children[:int(num_rollouts)]:
             
             (is_endgame, my_score, adv_score) = endgame(next_state.my_pos, next_state.adv_pos, next_state.chess_board) # TODO approximate connected component 
             
@@ -205,12 +223,12 @@ class HeuristicRollout:
                 acc+=1
                 continue
             
-            acc += self.rec_rollout(next_state, HeuristicRollout.rollout_decay(num_rollouts))
+            acc += self.rec_rollout(next_state, HeuristicRollout.rollout_decay(num_rollouts), max_step)
         
         return acc
             
-    def run(self, num_rollouts):
-        self.rec_rollout(self.curr_state, num_rollouts)
+    def run(self, num_rollouts, max_step):
+        self.rec_rollout(self.curr_state, num_rollouts, max_step)
         
 
 @register_agent("student_agent")
@@ -223,11 +241,11 @@ class StudentAgent(Agent):
         self.dir_map = {0: 'u', 1: 'r', 2: 'd', 3: 'l'}
         self.root_state = None # Initial state of the game
         #self.current_state = self.root_state # Progress of the game
-        Node.heuristic = heuristic
+        #Node.heuristic = heuristic
 
     def update_tree(self, chess_board, my_pos, adv_pos):
-        if not self.current_state:
-            self.current_state = Node(None, chess_board, my_pos, None, adv_pos, True)
+        if not self.root_state:
+            self.root_state = Node(None, chess_board, my_pos, None, adv_pos, True)
             return
 
         next_state = Node(None, chess_board, my_pos, None, adv_pos, True)
@@ -240,16 +258,16 @@ class StudentAgent(Agent):
 
             if node.expanded:
                 for child in node.children:
-                    if t := depth_2_search(child, depth + 1):
+                    if t := depth_2_search(child[0], depth + 1):
                         return t
 
                 for child in node.possible_children:
-                    if t := depth_2_search(child, depth + 1):
+                    if t := depth_2_search(child[0], depth + 1):
                         return t
             
             return None
 
-        if node := depth_2_search(self.current_state, 0):
+        if node := depth_2_search(self.root_state, 0):
             node.parent = None
             self.root_state = node
         else:
@@ -263,17 +281,35 @@ class StudentAgent(Agent):
 
         n = self.root_state.visits
 
-        def find_best_uct(node):
-            uct_max, uct_max_child = max(map(find_best_uct, node.children + node.possible_children), key=lambda pair: pair[0]) \
-                if not node.children or not node.possible_children else (-math.inf, None)
-            
-            return (uct_max, uct_max_child) if uct_max > (uct := node.uct_value(n)) else (uct, node)
+        def find_best_uct(init_node):
+            uct_max = -math.inf
+            uct_max_child = None
+            uct_to_explore = [init_node]
 
-        while time.time() - initial_time < COMPUTATION_TIME - TIME_DELTA:
+            while uct_to_explore:
+                node = uct_to_explore.pop(0)
+                if node.expanded:
+                    for child in node.children:
+                        uct_to_explore.append(child[0])
+                
+                if uct_max < node.uct_value(n):
+                    uct_max = node.uct_value(n)
+                    uct_max_child = node
+            
+            return uct_max, uct_max_child
+
+
+        #while time.time() - initial_time < COMPUTATION_TIME - TIME_DELTA:
+        while True:
+            print("INIT")
             (uct, best_child) = find_best_uct(self.root_state)
+            print("EXPAND")
             expanded = best_child.expand(1, max_step)
+            print("EXPANDED")
             for child in expanded:
-                child.rollout(100)
+                print("ROLLOUT")
+                child[0].rollout(5, max_step)
+                print("ROLLOUT - DONE")
         
         best_child = None
         best_child_uct = -math.inf
