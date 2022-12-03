@@ -7,6 +7,13 @@ import sys
 from copy import deepcopy
 import math 
 from random import randint
+import time
+
+TIME_DELTA = 0.05
+COMPUTATION_TIME = 2
+
+def heuristic(state):
+    return 2
 
 def endgame(p0_pos, p1_pos, chess_board):
     '''
@@ -74,7 +81,7 @@ class Node:
         self.expanded = False
         
     def __eq__(self, other):
-        return self.my_pos == other.my_pos and self.dir == other.dir and self.adv_pos == self.adv_pos and self.chess_board == other.chess_board
+        return self.my_pos == other.my_pos and self.adv_pos == self.adv_pos and self.chess_board == other.chess_board
     
     def __contains__(self, item):
         return any(item, lambda x : self.__eq__(item))
@@ -147,16 +154,19 @@ class Node:
         self.possible_children = sorted(self.possible_children, key = lambda _, val: val, reverse=self.agent_turn)
         
     def push_next_children(self, n):
-        self.children += self.possible_children[:n]
+        temp = self.possible_children[:n]
+        self.children += temp
         self.possible_children = self.possible_children[n:]
+        return temp
         
     def expand(self, n, max_step):
         if self.expanded:
-            self.push_next_children(n)
+            return self.push_next_children(n)
         else:
             self.generate_possible_moves(max_step)
-            self.push_next_children(n)
             self.expanded = True
+            return self.push_next_children(n)
+
      
     def backpropagate(self, wins, visits):
         node = self
@@ -167,10 +177,9 @@ class Node:
             node = node.parent
            
     def rollout(self, num_rollouts):
-        # rollout = HeuristicRollout...
-        # wins = rollout.rollout(num_rollouts, self.heuristic)
-        # backpropagate
-        pass        
+        rollout = HeuristicRollout(self)
+        rollout.run(num_rollouts)
+  
         
 class HeuristicRollout:
     def __init__(self, curr_state):
@@ -200,18 +209,9 @@ class HeuristicRollout:
         
         return acc
             
-    def rollout(self, num_rollouts):
+    def run(self, num_rollouts):
         self.rec_rollout(self.curr_state, num_rollouts)
         
-        
-
-        
-        
-        
-        
-        
-        
-    
 
 @register_agent("student_agent")
 class StudentAgent(Agent):
@@ -221,59 +221,74 @@ class StudentAgent(Agent):
         self.name = "StudentAgent"
         self.autoplay = True
         self.dir_map = {0: 'u', 1: 'r', 2: 'd', 3: 'l'}
-        self.root_state = Node() # Initial state of the game
-        self.current_state = self.root_state # Progress of the game
-        Node.heuristic = lambda state: 2
+        self.root_state = None # Initial state of the game
+        #self.current_state = self.root_state # Progress of the game
+        Node.heuristic = heuristic
 
+    def update_tree(self, chess_board, my_pos, adv_pos):
+        if not self.current_state:
+            self.current_state = Node(None, chess_board, my_pos, None, adv_pos, True)
+            return
 
-    # Helper functions `random_step` and `endgame` adapted from World class
-    def random_step(self, chess_board, my_pos, adv_pos, max_step):
-        '''
-        This is a copy of the world `random_walk` that will be used to simulate a random move in MCTS algorithm.
-        It is adapted such that we do not have to use numpy.
-        '''
-        ori_pos = deepcopy(my_pos) # Copy original position
-        moves = ((-1, 0), (0, 1), (1, 0), (0, -1)) # List of possible move directions
-        steps = randint(0, max_step + 1) # A random step size
-        
-        # Random Walk
-        for _ in range(steps):
-            r, c = my_pos # Position is row, col
-            dir = randint(0, len(moves)-1) # Choose a random direction
-            m_r, m_c = moves[dir] 
-            my_pos = (r + m_r, c + m_c) # Take a single step in that direction
+        next_state = Node(None, chess_board, my_pos, None, adv_pos, True)
 
-            # Special Case enclosed by Adversary
-            k = 0
-            while chess_board[r, c, dir] or my_pos == adv_pos: # while there is a wall or we are at adversary position
-                k += 1
-                if k > 300:
-                    break
-                dir = randint(0, len(moves)-1) 
-                m_r, m_c = moves[dir]
-                my_pos = (r + m_r, c + m_c)
+        def depth_2_search(node, depth):
+            if depth == 2:
+                if node == next_state:
+                    return node
+                return None
 
-            if k > 300:
-                my_pos = ori_pos
-                break
+            if node.expanded:
+                for child in node.children:
+                    if t := depth_2_search(child, depth + 1):
+                        return t
 
-        # Put Barrier
-        dir = randint(0, len(moves)-1)
-        r, c = my_pos
-        while chess_board[r, c, dir]:
+                for child in node.possible_children:
+                    if t := depth_2_search(child, depth + 1):
+                        return t
+            
+            return None
 
-            dir = randint(0, len(moves)-1)
+        if node := depth_2_search(self.current_state, 0):
+            node.parent = None
+            self.root_state = node
+        else:
+            self.root_state = next_state
 
-        return my_pos, dir
 
     def step(self, chess_board, my_pos, adv_pos, max_step):
+        initial_time = time.time()
+
+        self.update_tree(chess_board, my_pos, adv_pos)
+
+        n = self.root_state.visits
+
+        def find_best_uct(node):
+            uct_max, uct_max_child = max(map(find_best_uct, node.children + node.possible_children), key=lambda pair: pair[0]) \
+                if not node.children or not node.possible_children else (-math.inf, None)
+            
+            return (uct_max, uct_max_child) if uct_max > (uct := node.uct_value(n)) else (uct, node)
+
+        while time.time() - initial_time < COMPUTATION_TIME - TIME_DELTA:
+            (uct, best_child) = find_best_uct(self.root_state)
+            expanded = best_child.expand(1, max_step)
+            for child in expanded:
+                child.rollout(100)
         
-        
-        
-        
-        my_pos, dir = self.random_step(chess_board, my_pos, adv_pos, max_step)
-        
-        return my_pos, dir
+        best_child = None
+        best_child_uct = -math.inf
+
+        for direct_children in self.root_state.children:
+            min_child_uct, min_child = min(map(lambda child: (child.uct_value(n), child), direct_children.children + direct_children.possible_children), key=lambda pair: pair[0])
+
+            if not min_child:
+                continue
+
+            if min_child_uct > best_child_uct:
+                best_child = min_child
+                best_child_uct = min_child_uct
+
+        return best_child.parent.my_pos, best_child.parent.dir
 
 
 
