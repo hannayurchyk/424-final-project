@@ -8,51 +8,118 @@ from copy import deepcopy
 from math import log, sqrt, inf
 from random import randint
 
-class Node:
-    ''' 
-    MCTS node.
-    Args:
-        move ((int, int), str) : the position of this node on the chess_board that comes from a move made by the parent node
-        N (int) : times this node was visited
-        Q (int) : average winning rate from this position
-        children (dict) : stores the next possible moves from this position
-        win (bint) : if a node is a leaf, will be set to 1 if the game is won,
-                     0 if the game is lost and -1 otherwise
-    '''
-    def __init__(self, move = None, parent = None):
-        ''' 
-        Initializes a new node with a move and an optional parent node.
-        '''
+class Node:    
+    def __init__(self, parent, chess_board, my_pos, my_dir, adv_pos, agent_turn=True):
         self.parent = parent
-        self.move = move
-        self.N = 0 # Number of rollouts or simulations
-        self.Q = 0 # Number of wins per rollouts
-        self.children = {}
-        # self.outcome = -1
+        self.chess_board = chess_board
+        self.wins = 0 # Number of wins in rollouts (includes children nodes)
+        self.visits = 0 # Number of rollouts (includes children)
+        self.children = []
+        self.possible_children = []
+        self.my_pos = my_pos
+        self.my_dir = my_dir
+        self.adv_pos = adv_pos
+        self.agent_turn = agent_turn
+        self.expanded = False
         
-    def add_children(self, children):
-        '''
-        Adds children nodes to this node.
-        '''
-        for child in children:
-            self.children[child.move] = child
+    def __eq__(self, other):
+        return self.my_pos == other.my_pos and self.dir == other.dir and self.adv_pos == self.adv_pos
+    
+    def __contains__(self, item):
+        return any(item, lambda x : self.__eq__(item))
+    
+    def heuristic(self):
+        return 1
             
-    def value(self):
-        '''
-        Calculates the value of taking this move using upper confidence.
-        The constant `c` represents how much an agent favors the node given 
-        how much it was explored i.e. the exploration rate.
-        We will arbitrarily set c to 0.5.
-        '''
+    def uct_value(self, current_state):
         # Exploration rate
         c = 0.5
         
         # If the node was not visited, we will prioritize the exploration of the  node 
         # by setting its value to infinity
-        if self.N == 0:
+        if self.visits == 0:
             return inf
         # Otherwise return its confidence bound value
-        return self.Q / self.N + c * sqrt(log(self.parent.N)/self.N)
+        return self.wins / self.visits + c * sqrt(log(current_state.wins)/self.visits)
+    
+    def generate_possible_moves(self, max_step):
+        move_directions = ((-1, 0, 0), (0, 1, 1), (1, 0, 2), (0, -1, 3)) # Move Up, Right, Down, Left 
+        queue = [(self, 0)] # List of possible children nodes
+        
+        if self.agent_turn:
+            current_pos = lambda s: s.my_pos
+            other_pos_fn = lambda s: s.adv_pos
+            new_node = lambda new_chess_board, pos, dir: Node(new_chess_board, pos, dir, self.adv_pos, not self.agent_turn)
+        else:
+            current_pos = lambda s: s.adv_pos
+            other_pos_fn = lambda s: s.my_pos
+            new_node = lambda new_chess_board, pos, dir: Node(new_chess_board, self.my_pos, dir, pos, not self.agent_turn)
+            
+        while queue:
+            child, step_size = queue.pop(0)
+            # Check if the child is in the possible children
+            if child in self.possible_children:
+                continue
+            
+            # TODO call to heuristic         
+            self.possible_children.append((child, child.heursitic())) 
+            
+            # Check max step size
+            if step_size >= max_step:
+                continue
+            
+            pos = current_pos(child)
+            other = other_pos_fn(child)
+            
+            for (row, col, move_dir) in move_directions: # Positions
+                
+                if self.chess_board[pos[0]][pos[1]][move_dir]:
+                    continue
+                
+                new_row = pos[0] + row
+                new_col = pos[1] + col
+                
+                if (new_row, new_col) == other:
+                    continue
+                
+                for (_, _, dir) in move_directions: # Walls 
+                    if self.chess_board[new_row][new_col][dir]:
+                        continue
+                    
+                    new_chess_board = deepcopy(self.chess_board)
+                    new_chess_board[new_row][new_col][dir] = True
+                    
+                    new_child = new_node(new_chess_board, (new_row, new_col), dir)
+                    self.possible_children.append(new_child)
+                    queue.append((new_child, step_size + 1))
+                    
+        self.possible_children = sorted(self.possible_children, key = lambda _, val: val, reverse=True)
+        
+    def push_next_children(self, n):
+        self.children += self.possible_children[:n]
+        self.possible_children = self.possible_children[n:]
+        
+    def expand(self, n, max_step):
+        if self.expanded:
+            self.push_next_children(n)
+        else:
+            self.generate_possible_moves(max_step)
+            self.push_next_children(n)
+            self.expanded = True
+        
+class Rollout:
+    def __init__(self, curr_state):
+        
+            pass
+        
+        
+        
+        
+        
+        
+        
+        
+    
 
 @register_agent("student_agent")
 class StudentAgent(Agent):
@@ -66,9 +133,12 @@ class StudentAgent(Agent):
         self.name = "StudentAgent"
         self.autoplay = True
         self.dir_map = {0: 'u', 1: 'r', 2: 'd', 3: 'l'}
-        self.root = Node()
+        #self.root_state = Node() # Initial state of the game
+        #self.current_state = self.root_state # Progress of the game
+        Node.heuristic = lambda state: 2
+
         
-    def generate_moves(self, moves, chess_board, my_pos, adv_pos, max_step, curr_step_size):
+    def generate_moves(self, moves, moves_so_far, chess_board, my_pos, adv_pos, max_step, curr_step_size):
         '''
         Returns all possible next moves for a given position and a chess board.
         Recursive algorithm that does a Breadth-First Search of the possible moves around the agent. 
@@ -107,14 +177,15 @@ class StudentAgent(Agent):
                             continue
                         
                         # If the move is not a preceding move, add it to new moves
-                        if (new_move_r, new_move_c) not in moves:
+                        if (new_move_r, new_move_c) not in moves_so_far:
                             next_moves.append((new_move_r, new_move_c))
             
             # Recursive call 
-            return moves + self.generate_moves(next_moves, chess_board, my_pos, adv_pos, max_step, curr_step_size+1)
+            return moves + self.generate_moves(next_moves, moves+next_moves, chess_board, my_pos, adv_pos, max_step, curr_step_size+1)
         
         # Return an empty list when when we reach the maximal step size
-        return next_moves 
+        return next_moves
+
             
     def generate_children(self, moves, chess_board):
         '''
@@ -127,14 +198,67 @@ class StudentAgent(Agent):
             for dir in range(0, len(chess_board[x, y])):
                     # If there is no wall, add it as a next possible move 
                     if not chess_board[x, y, dir]:
-                        child = Node(move=((x,y), self.dir_map[dir]), parent=self.root)
-                        self.root.children[child.move] = child
+                        child = Node(move=((x,y), dir), parent=self.current_state)
+                        self.current_state.children[child.move] = child
                         
-    def simulation(self, child, adv_pos, chess_board):
-        pass
+    def modify_chess_board(self, move, chess_board):
+        # Extract the position and the direction from the move
+        (row, col), dir = move
+        # Put a wall
+        chess_board[row, col, dir] = True
+        # Return the modified chess board
+        return chess_board
+                        
+    def rollout(self, child, adv_pos, chess_board, max_step):
+        '''
+        Simulates a single game starting with the child state and the adversary's current position.
+        Returns 1 if the game was won, and 0 if the game was lost.
+        '''
+        # Modify the chess board using child state mode
+        my_pos, my_dir = child.move
+        chess_board = self.modify_chess_board((my_pos, my_dir), chess_board)
         
+        # Simulate the moves alternatiely and modify the game state until the game is won by one of the players
+        endgame, my_score, adv_score = self.endgame(my_pos, adv_pos, chess_board)
+        print(f"is endgame1: {endgame}")
+        if endgame:
+            print("next move1")
+            if my_score > adv_score: 
+                    return 1 
+            return 0
+        
+        while not endgame:
+            
+            # Let the adversary take a random step
+            print(f"adv_pos1: {adv_pos}")
+            print(f"my_pos1: {my_pos}, {my_dir}")
+            adv_pos, adv_dir = self.random_step(chess_board, adv_pos, my_pos, max_step)
+            chess_board = self.modify_chess_board((adv_pos, adv_dir), chess_board)
+            endgame, my_score, adv_score = self.endgame(my_pos, adv_pos, chess_board)
+            print(f"is endgame2: {endgame}")
+            # Check if adversary move was a winning step
+            if endgame:
+                print("next move2")
+                if my_score > adv_score: 
+                    return 1 
+                return 0
+            print ("hu")
+            # If we didn't win the game, let the agent take a random state 
+            print(f"adv_pos2: {adv_pos}, {adv_dir}")
+            print(f"my_pos2: {my_pos}, {my_dir}")
+            my_pos, my_dir = self.random_step(chess_board, my_pos, adv_pos, max_step)
+            chess_board = self.modify_chess_board((my_pos, my_dir), chess_board)
+            endgame, my_score, adv_score = self.endgame(my_pos, adv_pos, chess_board)
+            
+            print(f"is endgame3: {endgame}")
+            # Check if agent's move was a winning step
+            if endgame:
+                print("next move3")
+                if my_score > adv_score: 
+                    return 1 
+                return 0
 
-    # Helper functions copied and adapted from World class
+    # Helper functions `random_step` and `endgame` adapted from World class
     def random_step(self, chess_board, my_pos, adv_pos, max_step):
         '''
         This is a copy of the world `random_walk` that will be used to simulate a random move in MCTS algorithm.
@@ -176,7 +300,7 @@ class StudentAgent(Agent):
 
     def endgame(self, p0_pos, p1_pos, chess_board):
         '''
-        Returns true if the game has ended, and false otherwise. Is used my MCTS to verify the endgame during rollouts.
+        Returns true if the game has ended, and false otherwise. Is used by MCTS to verify the endgame during rollouts.
         '''
         board_size = len(chess_board[0])
         moves = ((-1, 0), (0, 1), (1, 0), (0, -1))
@@ -210,6 +334,7 @@ class StudentAgent(Agent):
         for r in range(board_size):
             for c in range(board_size):
                 find((r, c))
+                
         p0_r = find(tuple(p0_pos))
         p1_r = find(tuple(p1_pos))
         p0_score = list(father.values()).count(p0_r)
@@ -219,19 +344,10 @@ class StudentAgent(Agent):
         if p0_r == p1_r:
             return False, p0_score, p1_score
         
-        # Game is finished 
+        # Game is finished
         if p0_score > p1_score:
             return True, p0_score, p1_score
-        
-        
-    
-    def random_autoplay():
-        '''
-        Simulates several random runs of the game. Outputs the winning percentage of the branch. 
-        Takes as input the number of random simulations.
-        '''
-        pass
-
+        return True, p0_score, p1_score
 
     def step(self, chess_board, my_pos, adv_pos, max_step):
         """
@@ -256,15 +372,23 @@ class StudentAgent(Agent):
 
         # test `generate_moves`
         #print(f'my position: {my_pos} with max step: {max_step}')
-        #print(chess_board)
+        print(chess_board)
 
         # test `generate_children``
-        self.generate_children(self.generate_moves([my_pos], chess_board, my_pos, adv_pos, max_step, 0), chess_board)
-        # for child in self.root.children:
-        #     print(self.root.children[child].move)
+        #self.generate_children(self.generate_moves([my_pos], chess_board, my_pos, adv_pos, max_step, 0), chess_board)
+        #print(self.generate_moves([my_pos], [my_pos], chess_board, my_pos, adv_pos, max_step, 0))
+
+        # for child in self.current_state.children:
+        #     print(self.current_state.children[child].move)
 
         # test `endgame`
         # print(self.endgame(my_pos, adv_pos, chess_board))
+        
+        # test `rollout`
+        #for child in self.current_state.children:
+        #    print(self.rollout(self.current_state.children[child], adv_pos, chess_board, max_step))
+        
+        my_pos, dir = self.random_step(chess_board, my_pos, adv_pos, max_step)
         
         return my_pos, dir
 
