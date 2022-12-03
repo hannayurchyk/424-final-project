@@ -120,14 +120,15 @@ class Node:
             new_node = lambda new_chess_board, pos, dir: Node(self, new_chess_board, self.my_pos, dir, pos, not self.agent_turn)
         
         # ADD WALLS AROUND CURRENT POSITION
+        queue = [] # List of possible children node
         for (_, _, dir) in move_directions:
             r, c = current_pos(self)
             if not self.chess_board[r][c][dir]:
                 new_chess_board = deepcopy(self.chess_board)
                 new_chess_board[r][c][dir] = True
-                self.possible_children.append(new_node(new_chess_board, current_pos(self), dir))
-                
-        queue = [(self, 0)] # List of possible children nodes
+                next_node = new_node(new_chess_board, current_pos(self), dir)
+                #self.possible_children.append((next_node, next_node.heuristic()))
+                queue.append((next_node, next_node.heuristic()))
 
         while queue:
             child, step_size = queue.pop(0)
@@ -136,9 +137,8 @@ class Node:
             if child in node_child:
                 continue
             
-            # TODO call to heuristic   
-            if not child == self:      
-                self.possible_children.append((child, child.heuristic())) 
+            # TODO call to heuristic    
+            self.possible_children.append((child, child.heuristic())) 
             
             # Check max step size
             if step_size >= max_step: ## TODO watch boundaries
@@ -299,8 +299,7 @@ class StudentAgent(Agent):
             return uct_max, uct_max_child
 
 
-        #while time.time() - initial_time < COMPUTATION_TIME - TIME_DELTA:
-        while True:
+        while time.time() - initial_time < COMPUTATION_TIME - TIME_DELTA:
             print("INIT")
             (uct, best_child) = find_best_uct(self.root_state)
             print("EXPAND")
