@@ -34,7 +34,7 @@ def heuristic(state):
     dist_to_adv = abs(state.my_pos[0]-state.adv_pos[0]) + abs(state.my_pos[1]-state.adv_pos[1]) # Compute the Manhattan distance to the opponent 
     
     # Return the weights of the heuristic features 
-    return adv_walls - (0 if my_walls < 3 else -math.inf) + dist_to_adv
+    return adv_walls - (0 if my_walls < 3 else math.inf) + dist_to_adv
 
 
 # Helper method to compare chess_board used to override equals method in Node class
@@ -239,9 +239,12 @@ class HeuristicRollout:
         # state_to_explore is a node
         state_to_explore.expand(0, max_step)
         
+        if state_to_explore.win or state_to_explore.lost: # If we have reached a terminal state
+            return 1
+
         acc = 0
         
-        for (next_state, heur) in state_to_explore.possible_children[:int(num_rollouts)]:
+        for (next_state, heur) in (state_to_explore.children + state_to_explore.possible_children)[:max(math.floor(num_rollouts), 1)]:
             
             (is_endgame, my_score, adv_score) = endgame(next_state.my_pos, next_state.adv_pos, next_state.chess_board) # TODO approximate connected component 
             
@@ -249,7 +252,7 @@ class HeuristicRollout:
                 if my_score < adv_score:
                     next_state.lost = True
                     next_state.backpropagate(0 , 1)
-                else:
+                elif my_score > adv_score: # do not favorise ties
                     next_state.win = True
                     next_state.backpropagate(1 , 1)
                 
@@ -261,7 +264,11 @@ class HeuristicRollout:
         return acc
             
     def run(self, num_rollouts, max_step):
+        if self.curr_state.win or self.curr_state.lost:
+            return
+        x = self.rec_rollout(self.curr_state, num_rollouts, max_step)
         self.rec_rollout(self.curr_state, num_rollouts, max_step)
+        print(x)
         
 
 @register_agent("student_agent")
@@ -339,16 +346,26 @@ class StudentAgent(Agent):
             z = COMPUTATION_TIME
         
         while time.time() - initial_time < z - TIME_DELTA:
+            print("find best uct")
             (uct, best_child) = find_best_uct(self.root_state)
+            print("expand")
             expanded = best_child.expand(NODES_TO_EXPAND, max_step) # Expand children (Search)
-            for child in expanded:
-                child[0].rollout(NUM_ROLLOUTS, max_step) # Set number of rollouts (apprx)
+            if not expanded:
+                best_child.rollout(NUM_ROLLOUTS, max_step) # Perform a rollout (Search)
+            else:
+                for child in expanded:
+                    print("rollout")
+                    child[0].rollout(NUM_ROLLOUTS, max_step) # Set number of rollouts (apprx)
         
         best_child = self.root_state.children[0][0]
         best_child_uct = -math.inf
         n = self.root_state.visits
 
+        print("Checking uct values")
+        print("child", len(self.root_state.children))
+        acc = 0
         for direct_children in self.root_state.children:
+            acc+=1
             if direct_children[0].win:
                 best_child = direct_children[0]
                 break
@@ -370,6 +387,8 @@ class StudentAgent(Agent):
                 if min_child_uct > best_child_uct:
                     best_child = min_child.parent
                     best_child_uct = min_child_uct
+
+        print("uct for", acc)
 
         return best_child.my_pos, best_child.my_dir
 
