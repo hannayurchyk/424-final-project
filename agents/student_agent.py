@@ -12,12 +12,29 @@ import time
 TIME_DELTA = 0.05
 COMPUTATION_TIME = 2
 FIRST_COMPUTATION_TIME = 2
+NUM_ROLLOUTS = 10
+ROLLOUT_DECAY = 0.1
+NODES_TO_EXPAND = 2
+UCT_EXPLORATION_RATE = 0.7
 
 def flatten(l):
     return [item for sublist in l for subsublist in sublist for item in subsublist]
 
 def heuristic(state):
-    return 2
+    def get_walls(state, adv=True):
+        walls = []
+        if adv:
+            walls = state.chess_board[state.adv_pos[0]][state.adv_pos[1]]
+        else: 
+            walls = state.chess_board[state.my_pos[0]][state.my_pos[1]]
+        return list(walls).count(True)
+    
+    adv_walls = get_walls(state)
+    my_walls = get_walls(state, adv=False)
+    dist_to_adv = abs(state.my_pos[0]-state.adv_pos[0]) + abs(state.my_pos[1]-state.adv_pos[1])
+    
+    return adv_walls - math.exp(my_walls) - dist_to_adv
+
 
 def endgame(p0_pos, p1_pos, chess_board):
     '''
@@ -83,6 +100,7 @@ class Node:
         self.adv_pos = adv_pos
         self.agent_turn = agent_turn
         self.expanded = False
+        self.bad = False
         
     def __eq__(self, other):
         if not (self.my_pos == other.my_pos and self.adv_pos == other.adv_pos):
@@ -96,17 +114,17 @@ class Node:
     def heuristic(self):
         return 1
             
-    def uct_value(self, current_state):
-        # Exploration rate
-        c = 0.5
-        
+    def uct_value(self, current_state):       
         # If the node was not visited, we will prioritize the exploration of the  node 
         # by setting its value to infinity
         if self.visits == 0 or current_state == 0:
             return math.inf
         
+        if self.bad:
+            return -math.inf
+        
         # Otherwise return its confidence bound value
-        return self.wins / self.visits + c * math.sqrt(math.log(current_state)/self.visits)
+        return self.wins / self.visits + UCT_EXPLORATION_RATE * math.sqrt(math.log(current_state)/self.visits)
     
     def generate_possible_moves(self, max_step):
         move_directions = ((-1, 0, 0), (0, 1, 1), (1, 0, 2), (0, -1, 3)) # Move Up, Right, Down, Left 
@@ -189,7 +207,7 @@ class HeuristicRollout:
     # TODO define a decay schedule
     @staticmethod
     def rollout_decay(num_rollouts):
-        return num_rollouts*0.5
+        return num_rollouts*ROLLOUT_DECAY
     
     # TODO misuse of num_rollouts + acc
     def rec_rollout(self, state_to_explore, num_rollouts, max_step):
@@ -204,6 +222,9 @@ class HeuristicRollout:
             if is_endgame:
                 next_state.backpropagate(1 if my_score > adv_score else 0 , 1)
                 acc+=1
+                
+                if my_score < adv_score:
+                    next_state.bad = True
                 continue
             
             acc += self.rec_rollout(next_state, HeuristicRollout.rollout_decay(num_rollouts), max_step)
@@ -225,7 +246,7 @@ class StudentAgent(Agent):
         self.root_state = None
         self.first_run = True # Initial state of the game
         #self.current_state = self.root_state # Progress of the game
-        #Node.heuristic = heuristic
+        Node.heuristic = heuristic
 
     def update_tree(self, chess_board, my_pos, adv_pos):
         if not self.root_state:
@@ -288,9 +309,9 @@ class StudentAgent(Agent):
         
         while time.time() - initial_time < z - TIME_DELTA:
             (uct, best_child) = find_best_uct(self.root_state)
-            expanded = best_child.expand(1, max_step)
+            expanded = best_child.expand(NODES_TO_EXPAND, max_step) # Expand children 
             for child in expanded:
-                child[0].rollout(10, max_step)
+                child[0].rollout(NUM_ROLLOUTS, max_step) # Set number of rollouts
         
         best_child = None
         best_child_uct = -math.inf
