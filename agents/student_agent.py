@@ -104,9 +104,10 @@ class Node:
         self.my_pos = my_pos # Tuple (row, col)
         self.my_dir = my_dir # Int from 0 to 3 for directions up, right, down, left 
         self.adv_pos = adv_pos
-        self.agent_turn = agent_turn # Boolean indicating which agent's turn it is (for the first run we will have True for 2 depths)
-        self.expanded = False # Used to see if the step was expanded in our search according to our guess, or if it is contained in all the possible moves
-        self.bad = False # Indicating that a leaf node leads to a loss TODO verify if correctly implemented
+        self.agent_turn = agent_turn
+        self.expanded = False
+        self.lost = False
+        self.win = False
         
     def __eq__(self, other):
         if not (self.my_pos == other.my_pos and self.adv_pos == other.adv_pos):
@@ -127,8 +128,11 @@ class Node:
         # by setting its value to infinity
         if self.visits == 0 or current_state == 0:
             return math.inf
-        
-        if self.bad:
+
+        # Grooming UCT to always favor/disfavor node we know are either winning or losing
+        if self.win:
+            return math.inf
+        elif self.lost:
             return -math.inf
         
         # Otherwise return its confidence bound value
@@ -242,11 +246,14 @@ class HeuristicRollout:
             (is_endgame, my_score, adv_score) = endgame(next_state.my_pos, next_state.adv_pos, next_state.chess_board) # TODO approximate connected component 
             
             if is_endgame:
-                next_state.backpropagate(1 if my_score > adv_score else 0 , 1)
-                acc+=1
-                
                 if my_score < adv_score:
-                    next_state.bad = True
+                    next_state.lost = True
+                    next_state.backpropagate(0 , 1)
+                else:
+                    next_state.win = True
+                    next_state.backpropagate(1 , 1)
+                
+                acc+=1
                 continue
             
             acc += self.rec_rollout(next_state, HeuristicRollout.rollout_decay(num_rollouts), max_step)
@@ -337,11 +344,18 @@ class StudentAgent(Agent):
             for child in expanded:
                 child[0].rollout(NUM_ROLLOUTS, max_step) # Set number of rollouts (apprx)
         
-        best_child = None
+        best_child = self.root_state.children[0][0]
         best_child_uct = -math.inf
         n = self.root_state.visits
 
         for direct_children in self.root_state.children:
+            if direct_children[0].win:
+                best_child = direct_children[0]
+                break
+
+            if direct_children[0].lost:
+                continue
+
             children = [x for x in direct_children[0].children]
             if not children:
                 min_child_uct = direct_children[0].uct_value(n)
