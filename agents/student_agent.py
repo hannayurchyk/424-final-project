@@ -10,7 +10,7 @@ from random import randint
 import time
 
 TIME_DELTA = 0.1
-COMPUTATION_TIME = 1.999
+COMPUTATION_TIME = 1.9
 FIRST_COMPUTATION_TIME = 29.990
 NUM_ROLLOUTS = 100
 ROLLOUT_DECAY = 0.3
@@ -62,6 +62,17 @@ def wall_metrics(chess_board, pos):
 
     return math.sqrt(sum / default)
 
+def set_barrier(chess_board, r, c, dir):
+    # Moves (Up, Right, Down, Left)
+    moves = ((-1, 0), (0, 1), (1, 0), (0, -1))
+    opposites = {0: 2, 1: 3, 2: 0, 3: 1}
+    
+    # Set the barrier to True
+    chess_board[r, c, dir] = True
+    # Set the opposite barrier to True
+    move = moves[dir]
+    chess_board[r + move[0], c + move[1], opposites[dir]] = True
+
 # Define the heuristic according to which we want to rank the states of the game
 def heuristic(state):
     # state: Node
@@ -79,7 +90,7 @@ def heuristic(state):
     dist_to_adv = abs(state.my_pos[0]-state.adv_pos[0]) + abs(state.my_pos[1]-state.adv_pos[1]) # Compute the Manhattan distance to the opponent 
     
     # Return the weights of the heuristic features 
-    return 3*adv_walls - (0 if my_walls < 3 else math.inf) - dist_to_adv - sigmoid(wall_metrics(state.chess_board, state.my_pos) - wall_metrics(state.chess_board, state.adv_pos))
+    return 3*adv_walls - (0 if my_walls < 3 else math.inf) - dist_to_adv #- sigmoid(wall_metrics(state.chess_board, state.my_pos) - wall_metrics(state.chess_board, state.adv_pos))
 
 # Helper method to compare chess_board used to override equals method in Node class
 def flatten(l):
@@ -234,7 +245,7 @@ class Node:
                 if self.chess_board[pos[0], pos[1], dir]:
                     continue
                 new_chess_board = deepcopy(self.chess_board)
-                new_chess_board[pos[0], pos[1], dir] = 1
+                set_barrier(new_chess_board, pos[0], pos[1], dir)
                 new_node = new_node_fn(new_chess_board, pos, dir)
                 # Add a possible child here
                 self.possible_children.append((new_node, new_node.heuristic()))
@@ -281,7 +292,6 @@ class HeuristicRollout:
     def rollout_decay(num_rollouts):
         return num_rollouts*ROLLOUT_DECAY # ROLLOUT_DECAY
     
-    # TODO misuse of num_rollouts + acc
     # Recursive helper method to perform a rollout
     def rec_rollout(self, state_to_explore, num_rollouts, max_step, deadline = math.inf):   
         acc = 0
@@ -421,6 +431,9 @@ class StudentAgent(Agent):
                 break
 
             expanded = best_child.expand(NODES_TO_EXPAND, max_step, initial_time + z - TIME_DELTA*10) # Expand children (Search)
+
+            if best_child.lost or best_child.win:
+                continue
 
             if time.time() - initial_time > z - TIME_DELTA:
                 break
