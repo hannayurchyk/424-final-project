@@ -11,7 +11,7 @@ import time
 
 TIME_DELTA = 0.05
 COMPUTATION_TIME = 1.999
-FIRST_COMPUTATION_TIME = 29.990
+FIRST_COMPUTATION_TIME = 5 #29.990
 NUM_ROLLOUTS = 100
 ROLLOUT_DECAY = 0.3
 NODES_TO_EXPAND = 3
@@ -138,7 +138,7 @@ class Node:
         return self.wins / self.visits + UCT_EXPLORATION_RATE * math.sqrt(math.log(current_state)/self.visits)
     
     # Generates the possible children of the Node
-    def generate_possible_moves(self, max_step):
+    def generate_possible_moves(self, max_step, deadline = math.inf):
         move_directions = ((-1, 0, 0), (0, 1, 1), (1, 0, 2), (0, -1, 3)) # Move Up, Right, Down, Left 
         
         # Make a difference betweeen agent's turn and opponent's turn
@@ -158,6 +158,9 @@ class Node:
 
         # Perform Breadth-First Search to find all possible moves
         while queue:
+            if time.time() > deadline:
+                break
+
             pos, step = queue.pop(0)
             
             if pos in visited:
@@ -188,6 +191,11 @@ class Node:
                 new_node = new_node_fn(new_chess_board, pos, dir)
                 # Add a possible child here
                 self.possible_children.append((new_node, new_node.heuristic()))
+                if time.time() > deadline:
+                    break
+            else:
+                continue
+            break
 
         # Sort the possible children according to a heuristic
         # Sorting in ascending order for adversary because they seek to minimize our utility
@@ -202,11 +210,11 @@ class Node:
         return temp
         
     # Generates the next possible children from a node and pushes them as children
-    def expand(self, n, max_step):
+    def expand(self, n, max_step, deadline = math.inf):
         if self.expanded:
             return self.push_next_children(n)
         else:
-            self.generate_possible_moves(max_step)
+            self.generate_possible_moves(max_step, deadline)
             self.expanded = True
             return self.push_next_children(n)
 
@@ -218,9 +226,9 @@ class Node:
             node.visits += visits
             node = node.parent
            
-    def rollout(self, num_rollouts, max_step):
+    def rollout(self, num_rollouts, max_step, deadline = math.inf):
         rollout = HeuristicRollout(self)
-        rollout.run(num_rollouts, max_step)
+        rollout.run(num_rollouts, max_step, deadline)
         
 class HeuristicRollout:
     def __init__(self, curr_state):
@@ -233,7 +241,7 @@ class HeuristicRollout:
     
     # TODO misuse of num_rollouts + acc
     # Recursive helper method to perform a rollout
-    def rec_rollout(self, state_to_explore, num_rollouts, max_step):
+    def rec_rollout(self, state_to_explore, num_rollouts, max_step, deadline = math.inf):   
         self.depth += 1
         # state_to_explore is a node
         (is_endgame, my_score, adv_score) = endgame(state_to_explore.my_pos, state_to_explore.adv_pos, state_to_explore.chess_board)
@@ -254,16 +262,20 @@ class HeuristicRollout:
 
         for child, _ in (state_to_explore.children + state_to_explore.possible_children)[:init_child_rolls]:
             acc += self.rec_rollout(child, decayed, max_step)
+            if time.time() > deadline:
+                return 0
 
-        # computationally too expensive to do this
-        # missing_rolls = (init_child_rolls * decayed) - acc
-        # for child, _ in (state_to_explore.children + state_to_explore.possible_children)[init_child_rolls: init_child_rolls + missing_rolls]:
-        #     acc += self.rec_rollout(child, decayed, max_step)
+        # computationally expensive to do this
+        missing_rolls = (init_child_rolls * decayed) - acc
+        for child, _ in (state_to_explore.children + state_to_explore.possible_children)[init_child_rolls: int(init_child_rolls + missing_rolls)]:
+            acc += self.rec_rollout(child, decayed, max_step)
+            if time.time() > deadline:
+                return 0
 
         return acc
 
             
-    def run(self, num_rollouts, max_step):
+    def run(self, num_rollouts, max_step, deadline = math.inf):
         if self.curr_state.win or self.curr_state.lost:
             return
 
@@ -275,7 +287,7 @@ class HeuristicRollout:
 
         a = math.pow(1 + ROLLOUT_DECAY, -n * (n + 1) / 2)
         init_steps = math.pow(num_rollouts * a, 1 / (n + 1))
-        self.rec_rollout(self.curr_state, init_steps, max_step)     
+        self.rec_rollout(self.curr_state, init_steps, max_step, deadline)     
 
 @register_agent("student_agent")
 class StudentAgent(Agent):
@@ -287,6 +299,11 @@ class StudentAgent(Agent):
         self.root_state = None
         self.first_run = True # Initial state of the game
         Node.heuristic = heuristic # Redefine heuristic here
+        self.step_count = 0
+        self.expand_avg = 0
+        self.rollout_avg = 0
+        self.find_best_avg = 0
+        self.avg_rolls = 1
 
     def update_tree(self, chess_board, my_pos, adv_pos):
         # 1st run of the game
@@ -324,6 +341,8 @@ class StudentAgent(Agent):
 
     def step(self, chess_board, my_pos, adv_pos, max_step):
         initial_time = time.time()
+        
+        self.step_count += 1
 
         self.update_tree(chess_board, my_pos, adv_pos)
 
@@ -351,22 +370,45 @@ class StudentAgent(Agent):
         else:
             z = COMPUTATION_TIME
         
-        while time.time() - initial_time < z - TIME_DELTA:
+        expand_counter = 0
+        rollout_counter = 0
+        avg_rolls = 1
+
+        expand_avg = self.expand_avg
+        rollout_avg = self.rollout_avg
+
+        while time.time() - initial_time < z - TIME_DELTA - self.find_best_avg - expand_avg - rollout_avg * avg_rolls:
+            expand_init = time.time()
             (uct, best_child) = find_best_uct(self.root_state)
-            expanded = best_child.expand(NODES_TO_EXPAND, max_step) # Expand children (Search)
+            expanded = best_child.expand(NODES_TO_EXPAND, max_step, initial_time + z - TIME_DELTA - self.find_best_avg - self.rollout_avg * self.avg_rolls) # Expand children (Search)
+            expand_avg = (expand_avg * expand_counter + time.time() - expand_init) / (expand_counter + 1)
+            expand_counter += 1
+
+            rollout_init = time.time()
             if not expanded:
-                best_child.rollout(NUM_ROLLOUTS, max_step) # Perform a rollout (Search)
+                best_child.rollout(NUM_ROLLOUTS, max_step, initial_time + z - TIME_DELTA - self.find_best_avg) # Perform a rollout (Search)
             else:
+                c = 0
+                c_max = len(expanded)
                 for child in expanded:
-                    child[0].rollout(NUM_ROLLOUTS, max_step) # Set number of rollouts (apprx)
-        
+                    child[0].rollout(NUM_ROLLOUTS, initial_time + z - TIME_DELTA - self.find_best_avg - self.rollout_avg * (c_max-c)) # Set number of rollouts (apprx)
+                    c+=1
+            
+            rolls = len(expanded) if expanded else 1
+            avg_rolls = (avg_rolls * rollout_counter + rolls) / (rollout_counter + avg_rolls)
+            rollout_avg = (rollout_avg * rollout_counter + time.time() - rollout_init) / (rollout_counter + rolls)
+            rollout_counter += rolls
+
+        self.expand_avg = (self.expand_avg * (self.step_count - 1) + expand_avg) / self.step_count
+        self.rollout_avg = (self.rollout_avg * (self.step_count - 1) + rollout_avg) / self.step_count
+        self.avg_rolls = (self.avg_rolls * (self.step_count - 1) + avg_rolls) / self.step_count
+
         best_child = self.root_state.children[0][0]
         best_child_uct = -math.inf
         n = self.root_state.visits
 
-        acc = 0
+        find_best_init = time.time()
         for direct_children in self.root_state.children:
-            acc+=1
             if direct_children[0].win:
                 best_child = direct_children[0]
                 break
@@ -388,6 +430,8 @@ class StudentAgent(Agent):
                 if min_child_uct > best_child_uct:
                     best_child = min_child.parent
                     best_child_uct = min_child_uct
+
+        self.find_best_avg = (self.find_best_avg * (self.step_count - 1) + time.time() - find_best_init) / self.step_count
 
         return best_child.my_pos, best_child.my_dir
 
