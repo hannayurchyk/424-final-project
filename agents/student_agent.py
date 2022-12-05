@@ -12,7 +12,7 @@ import time
 TIME_DELTA = 0.05
 COMPUTATION_TIME = 1.999
 FIRST_COMPUTATION_TIME = 29.990
-NUM_ROLLOUTS = 20
+NUM_ROLLOUTS = 100
 ROLLOUT_DECAY = 0.3
 NODES_TO_EXPAND = 3
 UCT_EXPLORATION_RATE = 0.5
@@ -35,7 +35,6 @@ def heuristic(state):
     
     # Return the weights of the heuristic features 
     return adv_walls - (0 if my_walls < 3 else math.inf) + dist_to_adv
-
 
 # Helper method to compare chess_board used to override equals method in Node class
 def flatten(l):
@@ -222,54 +221,61 @@ class Node:
     def rollout(self, num_rollouts, max_step):
         rollout = HeuristicRollout(self)
         rollout.run(num_rollouts, max_step)
-  
         
 class HeuristicRollout:
     def __init__(self, curr_state):
         self.curr_state = curr_state # Node
+        self.depth = 0
     
-    # TODO define a decay schedule
     @staticmethod
     def rollout_decay(num_rollouts):
-        return num_rollouts*ROLLOUT_DECAY
+        return num_rollouts*ROLLOUT_DECAY # ROLLOUT_DECAY
     
     # TODO misuse of num_rollouts + acc
     # Recursive helper method to perform a rollout
     def rec_rollout(self, state_to_explore, num_rollouts, max_step):
+        self.depth += 1
         # state_to_explore is a node
-        state_to_explore.expand(0, max_step)
-        
-        if state_to_explore.win or state_to_explore.lost: # If we have reached a terminal state
+        (is_endgame, my_score, adv_score) = endgame(state_to_explore.my_pos, state_to_explore.adv_pos, state_to_explore.chess_board)
+        if is_endgame: # If we have reached a terminal state
+            if my_score < adv_score:
+                state_to_explore.lost = True
+                state_to_explore.backpropagate(0, 1)
+            else:
+                state_to_explore.win = True
+                state_to_explore.backpropagate(1, 1)
             return 1
 
+        state_to_explore.expand(0, max_step)
+
+        decayed = HeuristicRollout.rollout_decay(num_rollouts)
+        init_child_rolls = max(math.floor(num_rollouts), 1)
         acc = 0
-        
-        for (next_state, heur) in (state_to_explore.children + state_to_explore.possible_children)[:max(math.floor(num_rollouts), 1)]:
-            
-            (is_endgame, my_score, adv_score) = endgame(next_state.my_pos, next_state.adv_pos, next_state.chess_board) # TODO approximate connected component 
-            
-            if is_endgame:
-                if my_score < adv_score:
-                    next_state.lost = True
-                    next_state.backpropagate(0 , 1)
-                elif my_score > adv_score: # do not favorise ties
-                    next_state.win = True
-                    next_state.backpropagate(1 , 1)
-                
-                acc+=1
-                continue
-            
-            acc += self.rec_rollout(next_state, HeuristicRollout.rollout_decay(num_rollouts), max_step)
-        
+
+        for child, _ in (state_to_explore.children + state_to_explore.possible_children)[:init_child_rolls]:
+            acc += self.rec_rollout(child, decayed, max_step)
+
+        # computationally too expensive to do this
+        # missing_rolls = (init_child_rolls * decayed) - acc
+        # for child, _ in (state_to_explore.children + state_to_explore.possible_children)[init_child_rolls: init_child_rolls + missing_rolls]:
+        #     acc += self.rec_rollout(child, decayed, max_step)
+
         return acc
+
             
     def run(self, num_rollouts, max_step):
         if self.curr_state.win or self.curr_state.lost:
             return
-        x = self.rec_rollout(self.curr_state, num_rollouts, max_step)
-        self.rec_rollout(self.curr_state, num_rollouts, max_step)
-        print(x)
-        
+
+        n = -1 + math.sqrt(1 - 4 * 2 * math.log(num_rollouts) / math.log(ROLLOUT_DECAY))
+        n /= 2
+
+        self.rec_rollout(self.curr_state, 0, max_step) # initial depth test
+        n = min(math.floor(n), self.depth)
+
+        a = math.pow(1 + ROLLOUT_DECAY, -n * (n + 1) / 2)
+        init_steps = math.pow(num_rollouts * a, 1 / (n + 1))
+        self.rec_rollout(self.curr_state, init_steps, max_step)     
 
 @register_agent("student_agent")
 class StudentAgent(Agent):
@@ -346,23 +352,18 @@ class StudentAgent(Agent):
             z = COMPUTATION_TIME
         
         while time.time() - initial_time < z - TIME_DELTA:
-            print("find best uct")
             (uct, best_child) = find_best_uct(self.root_state)
-            print("expand")
             expanded = best_child.expand(NODES_TO_EXPAND, max_step) # Expand children (Search)
             if not expanded:
                 best_child.rollout(NUM_ROLLOUTS, max_step) # Perform a rollout (Search)
             else:
                 for child in expanded:
-                    print("rollout")
                     child[0].rollout(NUM_ROLLOUTS, max_step) # Set number of rollouts (apprx)
         
         best_child = self.root_state.children[0][0]
         best_child_uct = -math.inf
         n = self.root_state.visits
 
-        print("Checking uct values")
-        print("child", len(self.root_state.children))
         acc = 0
         for direct_children in self.root_state.children:
             acc+=1
@@ -387,8 +388,6 @@ class StudentAgent(Agent):
                 if min_child_uct > best_child_uct:
                     best_child = min_child.parent
                     best_child_uct = min_child_uct
-
-        print("uct for", acc)
 
         return best_child.my_pos, best_child.my_dir
 
