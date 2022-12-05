@@ -16,6 +16,51 @@ NUM_ROLLOUTS = 100
 ROLLOUT_DECAY = 0.3
 NODES_TO_EXPAND = 3
 UCT_EXPLORATION_RATE = 0.5
+METRICS_CONSTANT = 0.1
+
+def sigmoid(x):
+    try:
+        return 1 / (1 + math.exp(-x))
+    except OverflowError:
+        return 1 if x > 0 else -1
+
+def wall_metrics(chess_board, pos):
+    sum = 0
+    for i in range(0, pos[0]):
+        for j in range(0, pos[1]):
+            delta_x = abs(pos[0]-i)
+            delta_y = abs(pos[1]-j)
+            dist = math.sqrt(math.pow(delta_x, 2) + math.pow(delta_y, 2))
+            sum += math.pow(1/METRICS_CONSTANT, dist) * ((1 if chess_board[i][j][0] else 0)*delta_x + (1 if chess_board[i][j][3] else 0)*delta_y) / dist
+
+        for j in range(pos[1]+1, len(chess_board[i])):
+            delta_x = abs(pos[0]-i)
+            delta_y = abs(pos[1]-j)
+            dist = math.sqrt(math.pow(delta_x, 2) + math.pow(delta_y, 2))
+            sum += math.pow(1/METRICS_CONSTANT, dist) * ((1 if chess_board[i][j][0] else 0)*delta_x + (1 if chess_board[i][j][1] else 0)*delta_y) / dist
+
+    for i in range(pos[0]+1, len(chess_board)):
+        for j in range(0, pos[1]):
+            delta_x = abs(pos[0]-i)
+            delta_y = abs(pos[1]-j)
+            dist = math.sqrt(math.pow(delta_x, 2) + math.pow(delta_y, 2))
+            sum += math.pow(1/METRICS_CONSTANT, dist) * ((1 if chess_board[i][j][2] else 0)*delta_x + (1 if chess_board[i][j][3] else 0)*delta_y) / dist
+
+        for j in range(pos[1]+1, len(chess_board[i])):
+            delta_x = abs(pos[0]-i)
+            delta_y = abs(pos[1]-j)
+            dist = math.sqrt(math.pow(delta_x, 2) + math.pow(delta_y, 2))
+            sum += math.pow(1/METRICS_CONSTANT, delta_x + delta_y) * ((1 if chess_board[i][j][2] else 0)*delta_x + (1 if chess_board[i][j][1] else 0)*delta_y) / dist
+    
+    default = 0
+    for j in range(math.floor(len(chess_board)/2)):
+        dist = math.sqrt(math.pow(j, 2) + math.pow(math.floor(len(chess_board)/2), 2))
+        default += math.pow(1/METRICS_CONSTANT, dist) / dist
+
+
+    default *= 8    # assuming it is a square board
+
+    return math.sqrt(sum / default)
 
 # Define the heuristic according to which we want to rank the states of the game
 def heuristic(state):
@@ -34,7 +79,7 @@ def heuristic(state):
     dist_to_adv = abs(state.my_pos[0]-state.adv_pos[0]) + abs(state.my_pos[1]-state.adv_pos[1]) # Compute the Manhattan distance to the opponent 
     
     # Return the weights of the heuristic features 
-    return 3*adv_walls - (0 if my_walls < 3 else math.inf) - dist_to_adv
+    return 3*adv_walls - (0 if my_walls < 3 else math.inf) - dist_to_adv - sigmoid(wall_metrics(state.chess_board, state.my_pos) - wall_metrics(state.chess_board, state.adv_pos))
 
 # Helper method to compare chess_board used to override equals method in Node class
 def flatten(l):
@@ -122,11 +167,13 @@ class Node:
         return 1
             
     # Computes the Upper Confidence Tree of the Node        
-    def uct_value(self, current_state):       
+    def uct_value(self, current_state, accurate=False):       
         # If the node was not visited, we will prioritize the exploration of the  node 
         # by setting its value to infinity
-        if self.visits == 0 or current_state == 0:
+        if (self.visits == 0 and accurate) or current_state == 0:
             return math.inf
+        elif self.visits == 0:
+            return 0
 
         # Grooming UCT to always favor/disfavor node we know are either winning or losing
         if self.win:
@@ -248,7 +295,7 @@ class HeuristicRollout:
             if my_score < adv_score:
                 state_to_explore.lost = True
                 state_to_explore.backpropagate(0, 1)
-            else:
+            elif my_score > adv_score: # do not favor ties
                 state_to_explore.win = True
                 state_to_explore.backpropagate(1, 1)
             return 1
@@ -314,7 +361,7 @@ class StudentAgent(Agent):
         # We are in the middle of the game
         next_state = Node(None, chess_board, my_pos, None, adv_pos, True)
 
-        # Perform a search with depth 2 best move for us given that the adversary will pick the worst for for us (minimax)
+        # Check if the current state is already in the tree
         def depth_2_search(node, depth):
             if depth == 2:
                 if node == next_state:
@@ -395,6 +442,7 @@ class StudentAgent(Agent):
         best_child_uct = -math.inf
         n = self.root_state.visits
 
+        # Perform a search with depth 2 best move for us given that the adversary will pick the worst for for us (minimax)
         for direct_children in self.root_state.children:
             if direct_children[0].win:
                 best_child = direct_children[0]
@@ -408,14 +456,14 @@ class StudentAgent(Agent):
 
             children = [x for x in direct_children[0].children]
             if not children:
-                min_child_uct = direct_children[0].uct_value(n)
+                min_child_uct = direct_children[0].uct_value(n, accurate=True)
                 min_child = direct_children[0]
 
                 if min_child_uct > best_child_uct:
                     best_child = min_child
                     best_child_uct = min_child_uct
             else:
-                min_child_uct, min_child = min([(x.uct_value(n), x) for x, _ in children], key = lambda x: x[0])
+                min_child_uct, min_child = min([(x.uct_value(n, accurate=True), x) for x, _ in children], key = lambda x: x[0])
 
                 if min_child_uct > best_child_uct:
                     best_child = min_child.parent

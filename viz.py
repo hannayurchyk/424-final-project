@@ -24,26 +24,30 @@ my = (2, 3)
 adv = (2, 0)
 
 print(agents.student_agent.endgame(my, adv, list))
+print(agents.student_agent.wall_metrics(list, adv))
 
-# list = numpy.array([[[ True,  True, False,  True],\
-#         [ True, False, False,  True],\
-#         [ True, False,  True, False],\
-#         [ True,  True, False, False]],\
-#        [[ True, False, False,  True],\
-#         [ True,  True,  True, False],\
-#         [ True, False, False, False],\
-#         [ True,  True, False, False]],\
-#        [[ True, False,  True,  True],\
-#         [ True,  True,  True,  True],\
-#         [ True,  True,  True,  True],\
-#         [ True,  True, False, False]],\
-#        [[ True, False,  True,  True],\
-#         [ True, False,  True, False],\
-#         [False,  True,  True,  True],\
-#         [False,  True,  True,  True]]])
+list = numpy.array([[[ True,  True, False,  True],\
+        [ True, False, False,  True],\
+        [ True, False,  True, False],\
+        [ True,  True, False, False]],\
+       [[ True, False, False,  True],\
+        [ True,  True,  True, False],\
+        [ True, False, False, False],\
+        [ True,  True, False, False]],\
+       [[ True, False,  True,  True],\
+        [ True,  True,  True,  True],\
+        [ True,  True,  True,  True],\
+        [ True,  True, False, False]],\
+       [[ True, False,  True,  True],\
+        [ True, False,  True, False],\
+        [False,  True,  True,  True],\
+        [False,  True,  True,  True]]])
 
-# my = (2, 2)
-# adv = (2, 1)
+my = (2, 2)
+adv = (2, 1)
+
+print(agents.student_agent.wall_metrics(list, my))
+print(agents.student_agent.wall_metrics(list, adv))
 
 # print(agents.student_agent.endgame(my, adv, list))
 
