@@ -11,9 +11,9 @@ import time
 
 TIME_DELTA = 0.1
 COMPUTATION_TIME = 1.9
-FIRST_COMPUTATION_TIME = 29.990
+FIRST_COMPUTATION_TIME = 29.9
 NUM_ROLLOUTS = 100
-ROLLOUT_DECAY = 0.3
+ROLLOUT_DECAY = 0.5
 NODES_TO_EXPAND = 3
 UCT_EXPLORATION_RATE = 0.5
 METRICS_CONSTANT = 0.1
@@ -87,10 +87,10 @@ def heuristic(state):
     # Compute the ranking features 
     adv_walls = get_walls(state)
     my_walls = get_walls(state, adv=False)
-    dist_to_adv = abs(state.my_pos[0]-state.adv_pos[0]) + abs(state.my_pos[1]-state.adv_pos[1]) # Compute the Manhattan distance to the opponent 
+    dist_to_adv = abs(state.my_pos[0]-state.adv_pos[0]) + abs(state.my_pos[1]-state.adv_pos[1]) # Compute the Manhattan distance to the opponent
     
     # Return the weights of the heuristic features 
-    return 3*adv_walls - (0 if my_walls < 3 else math.inf) - dist_to_adv #- sigmoid(wall_metrics(state.chess_board, state.my_pos) - wall_metrics(state.chess_board, state.adv_pos))
+    return (10 if adv_walls < 3 else math.inf) - (0 if my_walls < 3 else math.inf) - dist_to_adv #- sigmoid(wall_metrics(state.chess_board, state.my_pos) - wall_metrics(state.chess_board, state.adv_pos))
 
 # Helper method to compare chess_board used to override equals method in Node class
 def flatten(l):

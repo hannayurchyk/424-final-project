@@ -3,12 +3,12 @@ import agents.student_agent
 
 # No multithreading allowed b/c of the global variables
 
-sim_args = [{"board_size": 5}]
+sim_args = [{'autoplay': True, 'autoplay_runs':100, 'board_size': 5, 'board_size_max': 50, 'board_size_min': 6, 'display': False, 'display_delay': 0.4, 'display_save': False, 'display_save_path': 'plots/', 'player_1': 'random_agent', 'player_2': 'student_agent'}]
 agent_args = [{"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},\
-                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},\
-                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},\
-                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},\
-                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},]
+                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.6, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},\
+                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":6, "UCT_EXPLORATION_RATE":0.5, "METRICS_CONSTANT": 0.1},\
+                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.7, "METRICS_CONSTANT": 0.1},\
+                {"TIME_DELTA": 0.1, "COMPUTATION_TIME":1.99, "FIRST_COMPUTATION_TIME": 29.99, "NUM_ROLLOUTS":100, "ROLLOUT_DECAY":0.3, "NODES_TO_EXPAND":3, "UCT_EXPLORATION_RATE":0.3, "METRICS_CONSTANT": 0.1},]
 
 
 default_get_args = simulator.get_args
@@ -19,7 +19,7 @@ def args_init(args_dict):
             setattr(agents.student_agent, key, value)
         else:
             print("Invalid key {}".format(key)) 
-
+            
 def args_override(sim_args):
     working_copy = default_get_args()
     working_copy.player_1 = "random_agent"

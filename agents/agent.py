@@ -6,9 +6,11 @@ class Agent:
         self.name = "DummyAgent"
         # Flag to indicate whether the agent can be used to autoplay
         self.autoplay = False
-
+ 
     def __str__(self) -> str:
         return self.name
+    
+    
 
     def step(self, chess_board, my_pos, adv_pos, max_step):
         """

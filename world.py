@@ -212,10 +212,10 @@ class World:
             delta = time() - start_time
             self.update_player_time(delta)
 
-            if self.turn and self.player_2_name == "student_agent":
-                print("player time", delta)
-            if not self.turn and self.player_1_name == "student_agent":
-                print("player time", delta)
+            # if self.turn and self.player_2_name == "student_agent":
+            #     print("player time", delta)
+            # if not self.turn and self.player_1_name == "student_agent":
+            #     print("player time", delta)
 
             next_pos = np.asarray(next_pos, dtype=cur_pos.dtype)
             if not self.check_boundary(next_pos):
